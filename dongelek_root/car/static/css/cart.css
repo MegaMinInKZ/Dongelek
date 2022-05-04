@@ -25,6 +25,9 @@ body{
     height: 30px;
 }
 .subcategory_cars{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-gap: 2rem;
 }
 .test{
     width: 90%;
