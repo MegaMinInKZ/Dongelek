@@ -1,3 +1,4 @@
+from cProfile import run
 from django.contrib import messages
 from django.shortcuts import *
 from django.http import HttpRequest, JsonResponse
@@ -139,13 +140,24 @@ def add_car(request):
 
 def brand(request, brand_slug):
     chosen_brand = Brand.objects.get(slug=brand_slug)
-    cars = Car.objects.filter(brand_id=chosen_brand.pk)
+    cars = Car.objects.filter(brand_id=chosen_brand.pk,isSold=False)
+    if request.method == 'GET':
+        form = request.GET.get('sort')
+        if form == 'priceup':
+            cars = cars.order_by('price')
+        elif form == 'pricedown':
+            cars = cars.order_by('-price')
+        elif form == 'news':
+            cars = cars.order_by('-time_created')
+        elif form == 'olds':
+            cars = cars.order_by('time_created')
     context = {
         'title': chosen_brand.name,
         'menu': menu,
         'cars': cars,
         'valutes': valutes,
-        'brand': chosen_brand
+        'brand': chosen_brand,
+        
     }
 
     return render(request, 'car/brand.html', context)
@@ -153,13 +165,23 @@ def brand(request, brand_slug):
 
 def city(request, city_slug):
     city = City.objects.get(slug=city_slug)
-    cars = Car.objects.filter(city_id=city.pk)
+    cars = Car.objects.filter(city_id=city.pk,isSold=False)
+    if request.method =='GET':
+        form = request.GET.get('sort')
+        if form == 'priceup':
+            cars = cars.order_by('price')
+        elif form == 'pricedown':
+            cars = cars.order_by('-price')
+        elif form == 'news':
+            cars = cars.order_by('-time_created')
+        elif form == 'olds':
+            cars = cars.order_by('time_created')
     context = {
         'valutes': valutes,
         'title': city.name,
         'menu': menu,
         'cars': cars,
-        'brand': city
+        'brand': city,
     }
     return render(request, 'car/brand.html', context)
 
@@ -187,7 +209,7 @@ def car(request, car_slug):
             try:
                 Comments.objects.create(**form.cleaned_data, author=request.user, car=car)
                 request.POST = None
-                return redirect('profile')
+                return redirect(car.get_absolute_url())
             except:
                 form.add_error(None, "There are some errors")
         form = AddComment()
@@ -219,7 +241,7 @@ def rate_car(request):
     if request.method == 'POST':
         rating = request.POST.get('rating')
         car_id = request.POST.get('car')
-        car = Car.objects.get(pk=car_id)
+        car = Car.objects.get(pk=car_id,isSold=False)
         rater = request.user
         Ratings.objects.filter(car=car, rater=rater).delete()
         Ratings.objects.create(rating=rating, car=car, rater=rater).save()
@@ -230,7 +252,7 @@ def rate_car(request):
 def add_to_cart(request):
     if request.method == 'POST':
         car_id = request.POST.get('car_basket')
-        car = Car.objects.get(pk=car_id)
+        car = Car.objects.get(pk=car_id,isSold=False)
         user = request.user
         Cart.objects.filter(car=car, user=user).delete()
         Cart.objects.create(car=car, user=user).save()
@@ -241,7 +263,7 @@ def add_to_cart(request):
 def delete_from_cart(request):
     if request.method == 'POST':
         car_id = request.POST.get('car_basket')
-        car = Car.objects.get(pk=car_id)
+        car = Car.objects.get(pk=car_id,isSold=False)
         user = request.user
         Cart.objects.filter(car=car, user=user).delete()
         return JsonResponse({'success': 'true'})
@@ -251,7 +273,7 @@ def delete_from_cart(request):
 def delete_car(request):
     if request.method == 'POST':
         car_id = request.POST.get('car')
-        car = Car.objects.filter(pk=car_id).delete()
+        car = Car.objects.filter(pk=car_id,isSold=False).delete()
         print(car)
         return JsonResponse({'success': 'true'})
     return JsonResponse({'success:': 'false'})
@@ -260,7 +282,7 @@ def delete_car(request):
 def send_email(request):
     if request.method == 'POST':
         car_id = request.POST.get('car_interested')
-        car = Car.objects.get(pk=car_id)
+        car = Car.objects.get(pk=car_id,isSold=False)
         seller_email = request.POST.get('seller_email')
         seller_username = request.POST.get('seller_username')
         subject = 'Someone is interested to your car '
@@ -342,10 +364,16 @@ def searchbar(request):
     if request.method == 'GET':
         post = {}
         if request.GET.getlist('city'):
-            post = Car.objects.filter(city__name__in=request.GET.getlist('city'), brand__name__in=request.GET.getlist('brand'))
+            if request.GET.get('search'):
+                search = request.GET.get('search')
+                context['search'] = search
+                post = Car.objects.filter(name__icontains=search, city__name__in=request.GET.getlist('city'), brand__name__in=request.GET.getlist('brand'), isSold=False)
+            else:
+                post = Car.objects.filter(city__name__in=request.GET.getlist('city'), brand__name__in=request.GET.getlist('brand'),isSold=False)
         elif request.GET.get('search'):
             search = request.GET.get('search')
-            post = Car.objects.filter(name__icontains=search)
+            context['search'] = search
+            post = Car.objects.filter(name__icontains=search,isSold=False)
         context['post'] = post
 
         return render(request, 'car/searchbar.html', context)
@@ -355,12 +383,14 @@ def purchase(request):
         cart = Cart.objects.get(pk=cart_id)
         user = cart.user
         car = cart.car
+        car.isSold = True
+        car.save()
         Purchase.objects.create(user=user, car=car).save()
         cart.delete()
-    return redirect('profile')
+    return redirect('purchases')
 def purchases(request):
     context = {
-        'purchases': Purchase.objects.filter(user=request.user),
+        'cars': Purchase.objects.filter(user=request.user),
         'valutes': valutes,
         'title': "My purchases",
         'menu': menu,
@@ -387,3 +417,28 @@ def purchase_pdf(request):
         c.save()
         buf.seek(0)
         return FileResponse(buf, as_attachment=True, filename='purchase.pdf')
+
+def update_user(request):
+    context = {
+        'valutes': valutes,
+        'title': "Update your profile",
+        'menu': menu,
+    }
+    if request.method == "POST":
+        user_form = UpdateUserForm(request.POST, instance=request.user)
+        if user_form.is_valid():
+            user_form.save()
+            return redirect('profile')
+        else:
+            context['error'] = "Enter unique username and email, also check out first name and last name accuracy"
+    return render(request, 'car/update_user.html', context)
+def my_advertisements(request):
+    cars = Car.objects.filter(seller=request.user)
+    context = {
+        'title': 'My Advertisements',
+        'menu': menu,
+        'cars': cars,
+        'valutes': valutes,
+        'seller': request.user
+    }
+    return render(request, 'car/my_advertisements.html', context)
